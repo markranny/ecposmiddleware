@@ -1386,8 +1386,8 @@ app.post('/api/sync-transactions', async (req, res) => {
         taxinclinprice: parseFloat(transactionSummary.taxinclinprice || 0).toFixed(2),
         netamountnotincltax: parseFloat(transactionSummary.netamountnotincltax || 0).toFixed(2),
         
-        // Fixed comment handling - use helper function to get the comment value
-        comment: "sample",
+        // FIXED: Use helper function to properly extract comment value
+        comment: getCommentValue(transactionSummary),
 
         // Payment methods - standardize to one property per payment type
         charge: String(parseFloat(transactionSummary.charge || '0.00').toFixed(2)),
@@ -1492,7 +1492,7 @@ app.post('/api/sync-transactions', async (req, res) => {
             taxinclinprice: parseFloat(record.taxamount || 0).toFixed(2),
             description: String(record.description || ''),
             
-            // Fixed comment handling for records too
+            // Properly use helper function for record comments
             comment: getCommentValue(record),
             
             netamountnotincltax: parseFloat(record.netamountnotincltax || 0).toFixed(2),
