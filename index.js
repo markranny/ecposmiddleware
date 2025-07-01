@@ -1472,9 +1472,10 @@ app.get('/api/getStaffData/:storeId', async (req, res) => {
               remarks: String(record.remarks || ''),
               taxinclinprice: parseFloat(record.taxamount || 0).toFixed(2),
               description: String(record.description || ''),
-
+              comment: String (record.comment ||  record.Comment || record.remarks 
+             || record.Comments || record.comments ||""),
               netamountnotincltax: parseFloat(record.netamountnotincltax || 0).toFixed(2),
-              
+         
               // Only include these fields if they have values
               ...(record.inventbatchid ? { inventbatchid: record.inventbatchid } : {}),
               ...(record.inventbatchexpdate ? { inventbatchexpdate: record.inventbatchexpdate } : {}),
