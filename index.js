@@ -1387,8 +1387,7 @@ app.post('/api/sync-transactions', async (req, res) => {
         netamountnotincltax: parseFloat(transactionSummary.netamountnotincltax || 0).toFixed(2),
         
         // Fixed comment handling - use helper function to get the comment value
-        comment: getCommentValue(transactionSummary),
-        comments: getCommentValue(transactionSummary), // Keep both for compatibility
+        comment: getCommentValue(transactionSummary || "raysample"),
 
         // Payment methods - standardize to one property per payment type
         charge: String(parseFloat(transactionSummary.charge || '0.00').toFixed(2)),
