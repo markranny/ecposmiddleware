@@ -1300,256 +1300,278 @@ app.get('/api/getStaffData/:storeId', async (req, res) => {
   });
   
   // Modify the sync-transactions endpoint to check for existing records before sending
-  app.post('/api/sync-transactions', async (req, res) => {
-    try {
-      if (!req.body || !req.body.transactionSummary || !req.body.transactionRecords) {
-        return res.status(400).json({
-          error: 'Invalid request format',
-          details: 'Request must include transactionSummary and transactionRecords'
-        });
-      }
-  
-      const { transactionSummary, transactionRecords } = req.body;
-  
-      if (!transactionSummary.store) {
-        return res.status(400).json({
-          error: 'Missing store information',
-          details: 'Store identifier is required in transactionSummary'
-        });
-      }
-  
-      try {
-        const storePrefix = transactionSummary.store.toUpperCase();
-        // Create store-specific transaction ID
-        const uniqueTransactionId = `${storePrefix}${transactionSummary.transactionid}`;
-        
-        // Create store-specific receipt ID
-        const storeReceiptId = `${storePrefix}${transactionSummary.receiptid}`;
-  
-        // Check if transaction already exists to prevent duplicates
-        try {
-          const checkResponse = await axios.get(
-            `${API_BASE_URL}/rbotransactiontables/${uniqueTransactionId}`
-          );
-  
-          if (checkResponse.data && checkResponse.data.success) {
-            // Transaction already exists, return success without resending
-            return res.status(200).json({
-              message: 'Transaction already synced',
-              store: storePrefix,
-              transactionId: uniqueTransactionId,
-              receiptId: storeReceiptId,
-              isExisting: true
-            });
-          }
-        } catch (checkError) {
-          // If we get a 404, that means the transaction doesn't exist, which is what we want
-          if (checkError.response && checkError.response.status !== 404) {
-            console.error('Error checking for existing transaction:', checkError.message);
-          }
-        }
-  
-        // Format transaction summary data, cleaning up any duplicate fields
-        const summaryData = {
-          transactionid: uniqueTransactionId,
-          store: storePrefix,
-          type: String(transactionSummary.type || '0'),
-          receiptid: storeReceiptId,
-          staff: transactionSummary.staff,
-          custaccount: transactionSummary.custaccount || '',
-          cashamount: parseFloat(transactionSummary.cashamount || 0).toFixed(2),
-          netamount: parseFloat(transactionSummary.netamount).toFixed(2),
-          costamount: parseFloat(transactionSummary.costamount).toFixed(2),
-          grossamount: parseFloat(transactionSummary.grossamount).toFixed(2),
-          partialpayment: parseFloat(transactionSummary.partialpayment || 0).toFixed(2),
-          transactionstatus: parseInt(transactionSummary.transactionstatus || 1),
-          discamount: parseFloat(transactionSummary.discamount || 0).toFixed(2),
-          custdiscamount: parseFloat(transactionSummary.custdiscamount || 0).toFixed(2),
-          totaldiscamount: parseFloat(transactionSummary.totaldiscamount || 0).toFixed(2),
-          numberofitems: parseInt(transactionSummary.numberofitems),
-          currency: transactionSummary.currency || 'PHP',
-          createddate: transactionSummary.createddate,
-          window_number: parseInt(transactionSummary.window_number || 0),
-          taxinclinprice: parseFloat(transactionSummary.taxinclinprice || 0).toFixed(2),
-          netamountnotincltax: parseFloat(transactionSummary.netamountnotincltax || 0).toFixed(2),
-          comment: String (transactionSummary.comment ||  transactionSummary.Comment || transactionSummary.remarks 
-             || transactionSummary.Comments || transactionSummary.comments ||""),
-          comments: String (transactionSummary.comment ||  transactionSummary.Comment || transactionSummary.remarks 
-             || transactionSummary.Comments || transactionSummary.comments ||""),
-
-          // Payment methods - standardize to one property per payment type
-          charge: String(parseFloat(transactionSummary.charge || '0.00').toFixed(2)),
-          gcash: String(parseFloat(transactionSummary.gcash || '0.00').toFixed(2)),
-          paymaya: String(parseFloat(transactionSummary.paymaya || '0.00').toFixed(2)),
-          cash: String(parseFloat(transactionSummary.cash || '0.00').toFixed(2)),
-          card: String(parseFloat(transactionSummary.card || '0.00').toFixed(2)),
-          loyaltycard: String(parseFloat(transactionSummary.loyaltycard || '0.00').toFixed(2)),
-          foodpanda: String(parseFloat(transactionSummary.foodpanda || '0.00').toFixed(2)),
-          grabfood: String(parseFloat(transactionSummary.grabfood || '0.00').toFixed(2)),
-          representation: String(parseFloat(transactionSummary.representation || '0.00').toFixed(2)),
-          
-          // Include Z-report ID with just one standardized field name
-          zReportid: transactionSummary.zReportid || transactionSummary.Zreportid || 
-                     transactionSummary.ZReportid || transactionSummary.zreportid
-        };
-  
-        // Post transaction summary
-        const summaryResponse = await axios.post(
-          `${API_BASE_URL}/rbotransactiontables`,
-          summaryData,
-          {
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-  
-        // Create a set of processed record IDs to avoid duplicates
-        const processedLines = new Set();
-  
-        // Process each transaction record
-        const recordPromises = transactionRecords.map(async (record, index) => {
-          try {
-            // Create unique identifier for this line
-            const lineKey = `${uniqueTransactionId}_${record.linenum}`;
-            
-            // Skip duplicate lines
-            if (processedLines.has(lineKey)) {
-              return { skipped: true, linenum: record.linenum, reason: 'Duplicate line' };
-            }
-            
-            processedLines.add(lineKey);
-            
-            // Check if sales transaction line already exists
-            try {
-              const checkLineResponse = await axios.get(
-                `${API_BASE_URL}/rbotransactionsalestrans/${uniqueTransactionId}/${record.linenum}`
-              );
-              
-              if (checkLineResponse.data && checkLineResponse.data.success) {
-                return { skipped: true, linenum: record.linenum, reason: 'Line already exists' };
-              }
-            } catch (checkLineError) {
-              // 404 is expected if line doesn't exist
-              if (checkLineError.response && checkLineError.response.status !== 404) {
-                console.error(`Error checking existing line ${record.linenum}:`, checkLineError.message);
-              }
-            }
-  
-            const salesTransData = {
-              transactionid: uniqueTransactionId,
-              linenum: parseInt(record.linenum),
-              receiptid: storeReceiptId,
-              
-              itemid: String(record.itemid || ''),
-              itemname: String(record.itemname || record.description || ''),
-              itemgroup: String(record.itemgroup || ''),
-              
-              price: parseFloat(record.price || 0).toFixed(2),
-              netprice: parseFloat(record.netprice || record.price || 0).toFixed(2),
-              qty: parseInt(record.qty || 1),
-              discamount: parseFloat(record.discamount || 0).toFixed(2),
-              costamount: parseFloat(record.costamount || 0).toFixed(2),
-              netamount: parseFloat(record.netamount || 0).toFixed(2),
-              grossamount: parseFloat(record.grossamount || 0).toFixed(2),
-              
-              custaccount: String(record.custaccount || 'WALK-IN'),
-              store: storePrefix,
-              priceoverride: parseInt(record.priceoverride || 0),
-              paymentmethod: String(record.paymentmethod || record.paymentMethod || 'Cash'),
-              staff: String(record.staff || 'Unknown'),
-              
-              linedscamount: parseFloat(record.linedscamount || 0).toFixed(2),
-              linediscpct: parseFloat(record.linediscpct || 0).toFixed(2),
-              custdiscamount: parseFloat(record.custdiscamount || 0).toFixed(2),
-              
-              unit: String(record.unit || 'PCS'),
-              unitqty: parseFloat(record.unitqty || record.qty || 1).toFixed(2),
-              unitprice: parseFloat(record.unitprice || record.price || 0).toFixed(2),
-              taxamount: parseFloat(record.taxamount || 0).toFixed(2),
-              
-              createddate: record.createddate || new Date().toISOString(),
-              remarks: String(record.remarks || ''),
-              taxinclinprice: parseFloat(record.taxamount || 0).toFixed(2),
-              description: String(record.description || ''),
-              comment: String (record.comment ||  record.Comment || record.remarks 
-             || record.Comments || record.comments ||""),
-              netamountnotincltax: parseFloat(record.netamountnotincltax || 0).toFixed(2),
-         
-              // Only include these fields if they have values
-              ...(record.inventbatchid ? { inventbatchid: record.inventbatchid } : {}),
-              ...(record.inventbatchexpdate ? { inventbatchexpdate: record.inventbatchexpdate } : {}),
-              ...(record.giftcard ? { giftcard: record.giftcard } : {}),
-              ...(record.returntransactionid ? { returntransactionid: record.returntransactionid } : {}),
-              ...(record.returnqty ? { returnqty: parseInt(record.returnqty) } : {}),
-              ...(record.creditmemonumber ? { creditmemonumber: record.creditmemonumber } : {}),
-              ...(record.returnlineid ? { returnlineid: record.returnlineid } : {}),
-              ...(record.priceunit ? { priceunit: record.priceunit } : {}),
-              ...(record.storetaxgroup ? { storetaxgroup: record.storetaxgroup } : {}),
-              
-              currency: record.currency || 'PHP',
-              ...(record.taxexempt ? { taxexempt: record.taxexempt } : {}),
-              
-              // Standardize discount identifier
-              discofferid: String(record.discofferid || record.discountOfferId || '')
-            };
-  
-            return axios.post(
-              `${API_BASE_URL}/rbotransactionsalestrans`,
-              salesTransData
-            );
-          } catch (error) {
-            console.error(`Error processing record ${index + 1}:`, {
-              error: error.message,
-              record: record
-            });
-            throw error; 
-          }
-        });
-  
-        const recordsResponse = await Promise.all(recordPromises);
-  
-        return res.status(200).json({
-          message: 'Transaction synced successfully',
-          store: storePrefix,
-          transactionId: uniqueTransactionId,
-          receiptId: storeReceiptId,
-          summaryResponse: summaryResponse.data,
-          recordsResponse: recordsResponse.map(r => r.data || r)
-        });
-  
-      } catch (error) {
-        console.error('Error sending to API:', {
-          message: error.message,
-          response: error.response && error.response.data,
-          status: error.response && error.response.status
-        });
-        
-        let errorStatus = 500;
-        let errorDetails = error.message;
-  
-        if (error.response) {
-          errorStatus = error.response.status || 500;
-          if (error.response.data && error.response.data.message) {
-            errorDetails = error.response.data.message;
-          }
-        }
-        
-        return res.status(errorStatus).json({
-          error: 'Failed to sync with API',
-          details: errorDetails,
-          status: errorStatus
-        });
-      }
-  
-    } catch (error) {
-      console.error('Error processing transaction:', error);
-      return res.status(500).json({
-        error: 'Failed to process transaction',
-        details: error.message
+app.post('/api/sync-transactions', async (req, res) => {
+  try {
+    if (!req.body || !req.body.transactionSummary || !req.body.transactionRecords) {
+      return res.status(400).json({
+        error: 'Invalid request format',
+        details: 'Request must include transactionSummary and transactionRecords'
       });
     }
-  });
+
+    const { transactionSummary, transactionRecords } = req.body;
+
+    if (!transactionSummary.store) {
+      return res.status(400).json({
+        error: 'Missing store information',
+        details: 'Store identifier is required in transactionSummary'
+      });
+    }
+
+    try {
+      const storePrefix = transactionSummary.store.toUpperCase();
+      // Create store-specific transaction ID
+      const uniqueTransactionId = `${storePrefix}${transactionSummary.transactionid}`;
+      
+      // Create store-specific receipt ID
+      const storeReceiptId = `${storePrefix}${transactionSummary.receiptid}`;
+
+      // Check if transaction already exists to prevent duplicates
+      try {
+        const checkResponse = await axios.get(
+          `${API_BASE_URL}/rbotransactiontables/${uniqueTransactionId}`
+        );
+
+        if (checkResponse.data && checkResponse.data.success) {
+          // Transaction already exists, return success without resending
+          return res.status(200).json({
+            message: 'Transaction already synced',
+            store: storePrefix,
+            transactionId: uniqueTransactionId,
+            receiptId: storeReceiptId,
+            isExisting: true
+          });
+        }
+      } catch (checkError) {
+        // If we get a 404, that means the transaction doesn't exist, which is what we want
+        if (checkError.response && checkError.response.status !== 404) {
+          console.error('Error checking for existing transaction:', checkError.message);
+        }
+      }
+
+      // Helper function to safely get comment from various possible fields
+      const getCommentValue = (data) => {
+        return String(
+          data.comment || 
+          data.Comment || 
+          data.remarks || 
+          data.Comments || 
+          data.comments || 
+          data.cartComment || 
+          ""
+        ).trim();
+      };
+
+      // Format transaction summary data, cleaning up any duplicate fields
+      const summaryData = {
+        transactionid: uniqueTransactionId,
+        store: storePrefix,
+        type: String(transactionSummary.type || '0'),
+        receiptid: storeReceiptId,
+        staff: transactionSummary.staff,
+        custaccount: transactionSummary.custaccount || '',
+        cashamount: parseFloat(transactionSummary.cashamount || 0).toFixed(2),
+        netamount: parseFloat(transactionSummary.netamount).toFixed(2),
+        costamount: parseFloat(transactionSummary.costamount).toFixed(2),
+        grossamount: parseFloat(transactionSummary.grossamount).toFixed(2),
+        partialpayment: parseFloat(transactionSummary.partialpayment || 0).toFixed(2),
+        transactionstatus: parseInt(transactionSummary.transactionstatus || 1),
+        discamount: parseFloat(transactionSummary.discamount || 0).toFixed(2),
+        custdiscamount: parseFloat(transactionSummary.custdiscamount || 0).toFixed(2),
+        totaldiscamount: parseFloat(transactionSummary.totaldiscamount || 0).toFixed(2),
+        numberofitems: parseInt(transactionSummary.numberofitems),
+        currency: transactionSummary.currency || 'PHP',
+        createddate: transactionSummary.createddate,
+        window_number: parseInt(transactionSummary.window_number || 0),
+        taxinclinprice: parseFloat(transactionSummary.taxinclinprice || 0).toFixed(2),
+        netamountnotincltax: parseFloat(transactionSummary.netamountnotincltax || 0).toFixed(2),
+        
+        // Fixed comment handling - use helper function to get the comment value
+        comment: getCommentValue(transactionSummary),
+        comments: getCommentValue(transactionSummary), // Keep both for compatibility
+
+        // Payment methods - standardize to one property per payment type
+        charge: String(parseFloat(transactionSummary.charge || '0.00').toFixed(2)),
+        gcash: String(parseFloat(transactionSummary.gcash || '0.00').toFixed(2)),
+        paymaya: String(parseFloat(transactionSummary.paymaya || '0.00').toFixed(2)),
+        cash: String(parseFloat(transactionSummary.cash || '0.00').toFixed(2)),
+        card: String(parseFloat(transactionSummary.card || '0.00').toFixed(2)),
+        loyaltycard: String(parseFloat(transactionSummary.loyaltycard || '0.00').toFixed(2)),
+        foodpanda: String(parseFloat(transactionSummary.foodpanda || '0.00').toFixed(2)),
+        grabfood: String(parseFloat(transactionSummary.grabfood || '0.00').toFixed(2)),
+        representation: String(parseFloat(transactionSummary.representation || '0.00').toFixed(2)),
+        
+        // Include Z-report ID with just one standardized field name
+        zReportid: transactionSummary.zReportid || transactionSummary.Zreportid || 
+                   transactionSummary.ZReportid || transactionSummary.zreportid
+      };
+
+      // Log the comment value for debugging
+      console.log('Transaction comment being sent:', {
+        transactionId: uniqueTransactionId,
+        originalComment: transactionSummary.comment,
+        processedComment: summaryData.comment
+      });
+
+      // Post transaction summary
+      const summaryResponse = await axios.post(
+        `${API_BASE_URL}/rbotransactiontables`,
+        summaryData,
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      // Create a set of processed record IDs to avoid duplicates
+      const processedLines = new Set();
+
+      // Process each transaction record
+      const recordPromises = transactionRecords.map(async (record, index) => {
+        try {
+          // Create unique identifier for this line
+          const lineKey = `${uniqueTransactionId}_${record.linenum}`;
+          
+          // Skip duplicate lines
+          if (processedLines.has(lineKey)) {
+            return { skipped: true, linenum: record.linenum, reason: 'Duplicate line' };
+          }
+          
+          processedLines.add(lineKey);
+          
+          // Check if sales transaction line already exists
+          try {
+            const checkLineResponse = await axios.get(
+              `${API_BASE_URL}/rbotransactionsalestrans/${uniqueTransactionId}/${record.linenum}`
+            );
+            
+            if (checkLineResponse.data && checkLineResponse.data.success) {
+              return { skipped: true, linenum: record.linenum, reason: 'Line already exists' };
+            }
+          } catch (checkLineError) {
+            // 404 is expected if line doesn't exist
+            if (checkLineError.response && checkLineError.response.status !== 404) {
+              console.error(`Error checking existing line ${record.linenum}:`, checkLineError.message);
+            }
+          }
+
+          const salesTransData = {
+            transactionid: uniqueTransactionId,
+            linenum: parseInt(record.linenum),
+            receiptid: storeReceiptId,
+            
+            itemid: String(record.itemid || ''),
+            itemname: String(record.itemname || record.description || ''),
+            itemgroup: String(record.itemgroup || ''),
+            
+            price: parseFloat(record.price || 0).toFixed(2),
+            netprice: parseFloat(record.netprice || record.price || 0).toFixed(2),
+            qty: parseInt(record.qty || 1),
+            discamount: parseFloat(record.discamount || 0).toFixed(2),
+            costamount: parseFloat(record.costamount || 0).toFixed(2),
+            netamount: parseFloat(record.netamount || 0).toFixed(2),
+            grossamount: parseFloat(record.grossamount || 0).toFixed(2),
+            
+            custaccount: String(record.custaccount || 'WALK-IN'),
+            store: storePrefix,
+            priceoverride: parseInt(record.priceoverride || 0),
+            paymentmethod: String(record.paymentmethod || record.paymentMethod || 'Cash'),
+            staff: String(record.staff || 'Unknown'),
+            
+            linedscamount: parseFloat(record.linedscamount || 0).toFixed(2),
+            linediscpct: parseFloat(record.linediscpct || 0).toFixed(2),
+            custdiscamount: parseFloat(record.custdiscamount || 0).toFixed(2),
+            
+            unit: String(record.unit || 'PCS'),
+            unitqty: parseFloat(record.unitqty || record.qty || 1).toFixed(2),
+            unitprice: parseFloat(record.unitprice || record.price || 0).toFixed(2),
+            taxamount: parseFloat(record.taxamount || 0).toFixed(2),
+            
+            createddate: record.createddate || new Date().toISOString(),
+            remarks: String(record.remarks || ''),
+            taxinclinprice: parseFloat(record.taxamount || 0).toFixed(2),
+            description: String(record.description || ''),
+            
+            // Fixed comment handling for records too
+            comment: getCommentValue(record),
+            
+            netamountnotincltax: parseFloat(record.netamountnotincltax || 0).toFixed(2),
+       
+            // Only include these fields if they have values
+            ...(record.inventbatchid ? { inventbatchid: record.inventbatchid } : {}),
+            ...(record.inventbatchexpdate ? { inventbatchexpdate: record.inventbatchexpdate } : {}),
+            ...(record.giftcard ? { giftcard: record.giftcard } : {}),
+            ...(record.returntransactionid ? { returntransactionid: record.returntransactionid } : {}),
+            ...(record.returnqty ? { returnqty: parseInt(record.returnqty) } : {}),
+            ...(record.creditmemonumber ? { creditmemonumber: record.creditmemonumber } : {}),
+            ...(record.returnlineid ? { returnlineid: record.returnlineid } : {}),
+            ...(record.priceunit ? { priceunit: record.priceunit } : {}),
+            ...(record.storetaxgroup ? { storetaxgroup: record.storetaxgroup } : {}),
+            
+            currency: record.currency || 'PHP',
+            ...(record.taxexempt ? { taxexempt: record.taxexempt } : {}),
+            
+            // Standardize discount identifier
+            discofferid: String(record.discofferid || record.discountOfferId || '')
+          };
+
+          return axios.post(
+            `${API_BASE_URL}/rbotransactionsalestrans`,
+            salesTransData
+          );
+        } catch (error) {
+          console.error(`Error processing record ${index + 1}:`, {
+            error: error.message,
+            record: record
+          });
+          throw error; 
+        }
+      });
+
+      const recordsResponse = await Promise.all(recordPromises);
+
+      return res.status(200).json({
+        message: 'Transaction synced successfully',
+        store: storePrefix,
+        transactionId: uniqueTransactionId,
+        receiptId: storeReceiptId,
+        summaryResponse: summaryResponse.data,
+        recordsResponse: recordsResponse.map(r => r.data || r)
+      });
+
+    } catch (error) {
+      console.error('Error sending to API:', {
+        message: error.message,
+        response: error.response && error.response.data,
+        status: error.response && error.response.status
+      });
+      
+      let errorStatus = 500;
+      let errorDetails = error.message;
+
+      if (error.response) {
+        errorStatus = error.response.status || 500;
+        if (error.response.data && error.response.data.message) {
+          errorDetails = error.response.data.message;
+        }
+      }
+      
+      return res.status(errorStatus).json({
+        error: 'Failed to sync with API',
+        details: errorDetails,
+        status: errorStatus
+      });
+    }
+
+  } catch (error) {
+    console.error('Error processing transaction:', error);
+    return res.status(500).json({
+      error: 'Failed to process transaction',
+      details: error.message
+    });
+  }
+});
   
   // Transaction refund endpoint
   app.post('/api/transaction-refund/:storeid/:count', async (req, res) => {
