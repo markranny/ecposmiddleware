@@ -1372,7 +1372,8 @@ app.get('/api/getStaffData/:storeId', async (req, res) => {
           window_number: parseInt(transactionSummary.window_number || 0),
           taxinclinprice: parseFloat(transactionSummary.taxinclinprice || 0).toFixed(2),
           netamountnotincltax: parseFloat(transactionSummary.netamountnotincltax || 0).toFixed(2),
-          
+          comment: transactionSummary.comment || "",
+
           // Payment methods - standardize to one property per payment type
           charge: String(parseFloat(transactionSummary.charge || '0.00').toFixed(2)),
           gcash: String(parseFloat(transactionSummary.gcash || '0.00').toFixed(2)),
@@ -1468,7 +1469,7 @@ app.get('/api/getStaffData/:storeId', async (req, res) => {
               remarks: String(record.remarks || ''),
               taxinclinprice: parseFloat(record.taxamount || 0).toFixed(2),
               description: String(record.description || ''),
-              
+
               netamountnotincltax: parseFloat(record.netamountnotincltax || 0).toFixed(2),
               
               // Only include these fields if they have values
