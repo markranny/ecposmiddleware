@@ -1372,7 +1372,7 @@ app.get('/api/getStaffData/:storeId', async (req, res) => {
           window_number: parseInt(transactionSummary.window_number || 0),
           taxinclinprice: parseFloat(transactionSummary.taxinclinprice || 0).toFixed(2),
           netamountnotincltax: parseFloat(transactionSummary.netamountnotincltax || 0).toFixed(2),
-          comment: transactionSummary.comment || "",
+          comment: transactionSummary.comment ||  transactionSummary.Comment || "",
 
           // Payment methods - standardize to one property per payment type
           charge: String(parseFloat(transactionSummary.charge || '0.00').toFixed(2)),
